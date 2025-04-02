@@ -47,24 +47,25 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /var/www/html
 
-# Install minimal runtime dependencies: copy package files and install production deps.
+# Copy package files and install production dependencies.
 COPY --from=build /data/package.json /data/yarn.lock ./
+
 # (Re)install curl and certificates for the healthcheck and runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set production environment so only production dependencies are installed.
 ENV NODE_ENV=production
-
 RUN yarn install --frozen-lockfile --production && yarn cache clean
 
 # Copy the built assets and other necessary files from the build stage.
-COPY --from=build /data/dist ./dist
+# NOTE: The original COPY used /data/dist, but if your build output is in the ".next" folder, update it accordingly.
+COPY --from=build /data/.next ./.next
 COPY --from=build /data/prisma ./prisma
 # (If you have an environment file, copy it as well – adjust as needed)
 # COPY --from=build /data/.env ./.env
 
-# Also copy the monolith binary from the builder stage.
+# Also copy the monolith binary from the build stage.
 COPY --from=build /usr/local/bin/monolith /usr/local/bin/monolith
 
 # (Optional) If you have any public assets or additional directories, copy them here.
