@@ -13,14 +13,13 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /data
 
-# Copy only the files needed for installing dependencies.
+# Copy files required for dependency installation.
 COPY package.json yarn.lock playwright.config.ts ./
 
-# Use a cache mount for Yarn to speed up repeated builds.
+# Install dependencies with a cache mount.
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
     set -eux && \
     yarn install --network-timeout 10000000 && \
-    # Install curl and ca-certificates (needed for playwright and healthcheck)
     apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -33,10 +32,10 @@ RUN set -eux && \
     npx playwright install --with-deps chromium && \
     yarn cache clean
 
-# Copy the rest of your source code.
+# Copy the entire source code (including your scripts folder).
 COPY . .
 
-# Run build steps (for example, Prisma generation and the build script).
+# Run build steps (e.g. generate Prisma client and build the app).
 RUN yarn prisma generate && yarn build
 
 ##############################
@@ -50,36 +49,38 @@ WORKDIR /var/www/html
 # Copy package files.
 COPY --from=build /data/package.json /data/yarn.lock ./
 
-# (Re)install minimal runtime dependencies: curl and certificates.
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+# Install minimal runtime dependencies.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set production environment so only production dependencies are installed.
+# Set production environment.
 ENV NODE_ENV=production
+
+# Install only production dependencies.
 RUN yarn install --frozen-lockfile --production && yarn cache clean
 
-# Install ts-node globally (required by your worker:prod command).
+# Install ts-node globally and ensure its binary is in the PATH.
 RUN yarn global add ts-node
+ENV PATH="/usr/local/share/.config/yarn/global/node_modules/.bin:${PATH}"
 
-# Copy built assets and other necessary files from the build stage.
-# (Adjust the folder if your build output folder is different than ".next")
+# Copy built assets and other necessary directories from the build stage.
+# (Assuming your Next.js build output is in .next.)
 COPY --from=build /data/.next ./.next
 COPY --from=build /data/prisma ./prisma
-
+# Also copy the scripts folder so that worker.ts is available.
+COPY --from=build /data/scripts ./scripts
 # Copy the monolith binary.
 COPY --from=build /usr/local/bin/monolith /usr/local/bin/monolith
 
-# (Optional) If you have any public assets or additional directories, copy them here.
+# (Optional) Copy any public assets if needed.
 # COPY --from=build /data/public ./public
 
 # Healthcheck for the container.
-HEALTHCHECK --interval=30s \
-            --timeout=5s \
-            --start-period=10s \
-            --retries=3 \
-            CMD [ "curl", "--silent", "--fail", "http://127.0.0.1:3000/" ]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD [ "curl", "--silent", "--fail", "http://127.0.0.1:3000/" ]
 
 EXPOSE 3000
 
-# Run any pending migrations, then start the app.
+# Run any pending migrations, then start the application.
 CMD yarn prisma migrate deploy && yarn start
