@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
 # Copy the monolith binary from the Rust builder.
 COPY --from=monolith-builder /usr/local/cargo/bin/monolith /usr/local/bin/monolith
 
-# Install Playwright and clean up caches.
+# Install Playwright (with its dependencies) and clean up caches.
 RUN set -eux && \
     npx playwright install --with-deps chromium && \
     yarn cache clean
@@ -36,7 +36,7 @@ RUN set -eux && \
 # Copy the rest of your source code.
 COPY . .
 
-# Run build steps (e.g. Prisma generation and the build script).
+# Run build steps (for example, Prisma generation and the build script).
 RUN yarn prisma generate && yarn build
 
 ##############################
@@ -47,10 +47,10 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /var/www/html
 
-# Copy package files and install production dependencies.
+# Copy package files.
 COPY --from=build /data/package.json /data/yarn.lock ./
 
-# (Re)install curl and certificates for the healthcheck and runtime.
+# (Re)install minimal runtime dependencies: curl and certificates.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -58,14 +58,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 ENV NODE_ENV=production
 RUN yarn install --frozen-lockfile --production && yarn cache clean
 
-# Copy the built assets and other necessary files from the build stage.
-# NOTE: The original COPY used /data/dist, but if your build output is in the ".next" folder, update it accordingly.
+# Install ts-node globally (required by your worker:prod command).
+RUN yarn global add ts-node
+
+# Copy built assets and other necessary files from the build stage.
+# (Adjust the folder if your build output folder is different than ".next")
 COPY --from=build /data/.next ./.next
 COPY --from=build /data/prisma ./prisma
-# (If you have an environment file, copy it as well – adjust as needed)
-# COPY --from=build /data/.env ./.env
 
-# Also copy the monolith binary from the build stage.
+# Copy the monolith binary.
 COPY --from=build /usr/local/bin/monolith /usr/local/bin/monolith
 
 # (Optional) If you have any public assets or additional directories, copy them here.
@@ -80,4 +81,5 @@ HEALTHCHECK --interval=30s \
 
 EXPOSE 3000
 
+# Run any pending migrations, then start the app.
 CMD yarn prisma migrate deploy && yarn start
